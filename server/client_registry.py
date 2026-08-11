@@ -103,7 +103,7 @@ def validate_username(username):
     if len(username) < 3:
         return False
 
-    if username.upper() in RESERVED_NAMES or username in RESERVED_NAMES:
+    if username in RESERVED_NAMES:
         return False
 
     if username.startswith("[") and username.endswith("]"):
@@ -118,3 +118,9 @@ def get_online_users() -> list:
             for client in clients.values()
             if client["name"] is not None
         ]
+
+def clean_clients():
+    with clients_lock:
+        clients.clear()
+
+        return True
