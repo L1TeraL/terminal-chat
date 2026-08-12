@@ -26,9 +26,7 @@ class FakeSocket:
         self.closed = True
 
 
-# --------------------------------------------------
 # send_message
-# --------------------------------------------------
 
 def test_send_message():
     client_socket = FakeSocket()
