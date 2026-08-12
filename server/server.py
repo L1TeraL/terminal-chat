@@ -62,7 +62,7 @@ def handle_client(client_socket):
         client_socket.close()
 
 
-def main():
+def main(host=HOST, port=PORT, stop_event=None):
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     server_socket.setsockopt(
@@ -71,14 +71,18 @@ def main():
         1,
     )
 
-    server_socket.bind((HOST, PORT))
+    server_socket.bind((host, port))
     server_socket.listen()
+    server_socket.settimeout(0.2)
 
-    print(f"[SERVER] Listening on {HOST}:{PORT}")
+    print(f"[SERVER] Listening on {host}:{port}")
 
     try:
-        while True:
-            client_socket, client_address = server_socket.accept()
+        while stop_event is None or not stop_event.is_set():
+            try:
+                client_socket, client_address = server_socket.accept()
+            except socket.timeout:
+                continue
 
             print(f"[SERVER] New connection: {client_address}")
 
