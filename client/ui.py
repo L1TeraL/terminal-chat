@@ -211,5 +211,32 @@ class ChatUI:
         )
         self._print()
 
+    def show_chat_history(self, history):
+        if not history:
+            return
+
+        console.print()
+
+        console.print(
+            Panel(
+                "[bold cyan]Recent messages[/bold cyan]",
+                border_style="cyan",
+            )
+        )
+
+        for message_id, username, message, created_at in history:
+            try:
+                time = created_at.split(" ")[1]
+            except (IndexError, AttributeError):
+                time = created_at
+
+            console.print(
+                f"[dim]{time}[/dim] "
+                f"[bold green]{username}[/bold green]: "
+                f"{message}"
+            )
+
+        console.print()
+
 
 ui = ChatUI()

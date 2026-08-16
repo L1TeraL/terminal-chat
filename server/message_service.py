@@ -1,6 +1,9 @@
 from server import client_registry
+from server.message_history import MessageHistory
 from shared import protocol, config
 
+
+message_history = MessageHistory()
 
 def process_message(client_socket, command, payload):
     if command == protocol.COMMAND_SET_NAME:
@@ -51,6 +54,16 @@ def send_user_list(client_socket):
     )
 
     send_to_client(client_socket, packet)
+
+def send_chat_history(sender_socket):
+    history = message_history.get_chat_history()
+
+    packet = protocol.encode_message(
+        protocol.COMMAND_CHAT_HISTORY,
+        history
+    )
+
+    return send_to_client(sender_socket, packet)
 
 def send_info(sender_socket, message):
     packet = protocol.encode_message(
@@ -116,6 +129,8 @@ def _handle_set_name(client_socket, username):
         f"Welcome, {username}!"
     )
 
+    send_chat_history(client_socket)
+
     send_user_list(client_socket)
 
     broadcast_info(
@@ -144,6 +159,13 @@ def _handle_chat(client_socket, payload):
 
     if not payload:
         return False
+
+    username = client_registry.get_client_name(client_socket)
+
+    message_history.add_message(
+        username,
+        payload
+    )
 
     broadcast_chat(client_socket, payload)
 

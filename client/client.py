@@ -31,6 +31,7 @@ def receive_messages(
     client_socket,
     stop_event,
     login_queue,
+    history_queue,
 ):
     buffer = ""
 
@@ -96,6 +97,9 @@ def receive_messages(
 
                 elif command == protocol.COMMAND_USER_LIST:
                     ui.show_users(payload)
+
+                elif command == protocol.COMMAND_CHAT_HISTORY:
+                    history_queue.put(payload)
 
                 else:
                     ui.show_error(
@@ -253,6 +257,7 @@ def chat_loop(
 def main():
     stop_event = threading.Event()
     login_queue = Queue()
+    history_queue = Queue()
 
     client_socket = socket.socket(
         socket.AF_INET,
@@ -275,6 +280,7 @@ def main():
                 client_socket,
                 stop_event,
                 login_queue,
+                history_queue,
             ),
             daemon=True,
         )
@@ -287,6 +293,13 @@ def main():
             stop_event,
         ):
             return
+
+        try:
+            history = history_queue.get(timeout=1)
+        except Empty:
+            history = []
+
+        ui.show_chat_history(history)
 
         chat_loop(
             client_socket,
