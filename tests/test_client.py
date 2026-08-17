@@ -1,4 +1,5 @@
-import pytest
+import threading
+from queue import Queue
 
 from client import client
 from shared import config, protocol
@@ -6,12 +7,12 @@ from shared import config, protocol
 
 class FakeSocket:
     def __init__(self, responses=None):
-        self.sent_data = None
+        self.sent_data = []
         self.responses = responses or []
         self.closed = False
 
     def sendall(self, data):
-        self.sent_data = data
+        self.sent_data.append(data)
 
     def recv(self, buffer_size):
         if not self.responses:
@@ -26,18 +27,20 @@ class FakeSocket:
         self.closed = True
 
 
+# ============================================================
 # send_message
+# ============================================================
 
 def test_send_message():
     client_socket = FakeSocket()
 
     result = client.send_message(
         client_socket,
-        "Hello"
+        "Hello",
     )
 
     assert result is True
-    assert client_socket.sent_data == b"Hello"
+    assert client_socket.sent_data == [b"Hello"]
 
 
 def test_send_message_failed():
@@ -49,18 +52,20 @@ def test_send_message_failed():
 
     result = client.send_message(
         client_socket,
-        "Hello"
+        "Hello",
     )
 
     assert result is False
 
 
+# ============================================================
 # receive_messages
+# ============================================================
 
-def test_receive_messages_chat(capsys):
+def test_receive_messages_chat(monkeypatch):
     packet = protocol.encode_message(
         protocol.COMMAND_CHAT,
-        "Alex: Hello"
+        "Alex: Hello",
     )
 
     client_socket = FakeSocket(
@@ -69,25 +74,33 @@ def test_receive_messages_chat(capsys):
         ]
     )
 
-    stop_event = __import__("threading").Event()
-    login_queue = __import__("queue").Queue()
+    stop_event = threading.Event()
+    login_queue = Queue()
+    history_queue = Queue()
+
+    received = []
+
+    monkeypatch.setattr(
+        client.ui,
+        "show_chat_message",
+        lambda message: received.append(message),
+    )
 
     client.receive_messages(
         client_socket,
         stop_event,
         login_queue,
+        history_queue,
     )
 
-    captured = capsys.readouterr()
-
-    assert "Alex: Hello" in captured.out
+    assert received == ["Alex: Hello"]
     assert stop_event.is_set()
 
 
 def test_receive_messages_login_ok():
     packet = protocol.encode_message(
         protocol.COMMAND_LOGIN_OK,
-        "Welcome, Alex!"
+        "Welcome, Alex!",
     )
 
     client_socket = FakeSocket(
@@ -96,29 +109,28 @@ def test_receive_messages_login_ok():
         ]
     )
 
-    import threading
-    from queue import Queue
-
     stop_event = threading.Event()
     login_queue = Queue()
+    history_queue = Queue()
 
     client.receive_messages(
         client_socket,
         stop_event,
         login_queue,
+        history_queue,
     )
 
     success, message = login_queue.get()
 
     assert success is True
-    assert message == ""
+    assert message == "Welcome, Alex!"
     assert stop_event.is_set()
 
 
 def test_receive_messages_login_failed():
     packet = protocol.encode_message(
         protocol.COMMAND_LOGIN_FAILED,
-        "Username already in taken."
+        "Username already in taken.",
     )
 
     client_socket = FakeSocket(
@@ -127,16 +139,15 @@ def test_receive_messages_login_failed():
         ]
     )
 
-    import threading
-    from queue import Queue
-
     stop_event = threading.Event()
     login_queue = Queue()
+    history_queue = Queue()
 
     client.receive_messages(
         client_socket,
         stop_event,
         login_queue,
+        history_queue,
     )
 
     success, message = login_queue.get()
@@ -146,10 +157,10 @@ def test_receive_messages_login_failed():
     assert stop_event.is_set()
 
 
-def test_receive_messages_info(capsys):
+def test_receive_messages_info(monkeypatch):
     packet = protocol.encode_message(
         protocol.COMMAND_INFO,
-        "Bob joined the chat."
+        "Bob joined the chat.",
     )
 
     client_socket = FakeSocket(
@@ -158,27 +169,32 @@ def test_receive_messages_info(capsys):
         ]
     )
 
-    import threading
-    from queue import Queue
-
     stop_event = threading.Event()
     login_queue = Queue()
+    history_queue = Queue()
+
+    received = []
+
+    monkeypatch.setattr(
+        client.ui,
+        "show_info",
+        lambda message: received.append(message),
+    )
 
     client.receive_messages(
         client_socket,
         stop_event,
         login_queue,
+        history_queue,
     )
 
-    captured = capsys.readouterr()
-
-    assert "[SERVER] Bob joined the chat." in captured.out
+    assert "Bob joined the chat." in received
 
 
-def test_receive_messages_error(capsys):
+def test_receive_messages_error(monkeypatch):
     packet = protocol.encode_message(
         protocol.COMMAND_ERROR,
-        "Something went wrong."
+        "Something went wrong.",
     )
 
     client_socket = FakeSocket(
@@ -187,27 +203,34 @@ def test_receive_messages_error(capsys):
         ]
     )
 
-    import threading
-    from queue import Queue
-
     stop_event = threading.Event()
     login_queue = Queue()
+    history_queue = Queue()
+
+    received = []
+
+    monkeypatch.setattr(
+        client.ui,
+        "show_error",
+        lambda message: received.append(message),
+    )
 
     client.receive_messages(
         client_socket,
         stop_event,
         login_queue,
+        history_queue,
     )
 
-    captured = capsys.readouterr()
-
-    assert "[ERROR] Something went wrong." in captured.out
+    assert received == ["Something went wrong."]
 
 
-def test_receive_messages_user_list(capsys):
+def test_receive_messages_user_list(monkeypatch):
+    users = ["Alex", "Bob", "Piter"]
+
     packet = protocol.encode_message(
         protocol.COMMAND_USER_LIST,
-        ["Alex", "Bob", "Piter"]
+        users,
     )
 
     client_socket = FakeSocket(
@@ -216,68 +239,206 @@ def test_receive_messages_user_list(capsys):
         ]
     )
 
-    import threading
-    from queue import Queue
-
     stop_event = threading.Event()
     login_queue = Queue()
+    history_queue = Queue()
+
+    received = []
+
+    monkeypatch.setattr(
+        client.ui,
+        "show_users",
+        lambda users: received.append(users),
+    )
 
     client.receive_messages(
         client_socket,
         stop_event,
         login_queue,
+        history_queue,
     )
 
-    captured = capsys.readouterr()
-
-    assert "[SERVER] Online 3" in captured.out
-    assert "- Alex" in captured.out
-    assert "- Bob" in captured.out
-    assert "- Piter" in captured.out
+    assert received == [users]
 
 
-def test_receive_messages_invalid_packet(capsys):
+def test_receive_messages_chat_history():
+    history = [
+        [1, "Alex", "Hello", "2026-08-17 17:00:00"],
+        [2, "Bob", "Hi", "2026-08-17 17:01:00"],
+    ]
+
+    packet = protocol.encode_message(
+        protocol.COMMAND_CHAT_HISTORY,
+        history,
+    )
+
     client_socket = FakeSocket(
         responses=[
-            b"INVALID_PACKET\n"
+            packet.encode(config.ENCODING),
         ]
     )
 
-    import threading
-    from queue import Queue
-
     stop_event = threading.Event()
     login_queue = Queue()
+    history_queue = Queue()
 
     client.receive_messages(
         client_socket,
         stop_event,
         login_queue,
+        history_queue,
     )
 
-    captured = capsys.readouterr()
+    received_history = history_queue.get()
 
-    assert "[ERROR] Invalid packet received." in captured.out
+    assert received_history == history
 
 
+def test_receive_messages_invalid_packet(monkeypatch):
+    client_socket = FakeSocket(
+        responses=[
+            b"INVALID_PACKET\n",
+        ]
+    )
+
+    stop_event = threading.Event()
+    login_queue = Queue()
+    history_queue = Queue()
+
+    errors = []
+
+    monkeypatch.setattr(
+        client.ui,
+        "show_error",
+        lambda message: errors.append(message),
+    )
+
+    client.receive_messages(
+        client_socket,
+        stop_event,
+        login_queue,
+        history_queue,
+    )
+
+    assert errors == [
+        "Invalid packet received."
+    ]
+
+
+def test_receive_messages_unknown_command(monkeypatch):
+    packet = protocol.encode_message(
+        "UNKNOWN_COMMAND",
+        "test",
+    )
+
+    client_socket = FakeSocket(
+        responses=[
+            packet.encode(config.ENCODING),
+        ]
+    )
+
+    stop_event = threading.Event()
+    login_queue = Queue()
+    history_queue = Queue()
+
+    errors = []
+
+    monkeypatch.setattr(
+        client.ui,
+        "show_error",
+        lambda message: errors.append(message),
+    )
+
+    client.receive_messages(
+        client_socket,
+        stop_event,
+        login_queue,
+        history_queue,
+    )
+
+    assert errors == [
+        "Unknown command: UNKNOWN_COMMAND"
+    ]
+
+
+def test_receive_messages_server_disconnected(monkeypatch):
+    client_socket = FakeSocket(
+        responses=[
+            b"",
+        ]
+    )
+
+    stop_event = threading.Event()
+    login_queue = Queue()
+    history_queue = Queue()
+
+    messages = []
+
+    monkeypatch.setattr(
+        client.ui,
+        "show_info",
+        lambda message: messages.append(message),
+    )
+
+    client.receive_messages(
+        client_socket,
+        stop_event,
+        login_queue,
+        history_queue,
+    )
+
+    assert messages == ["Server disconnected."]
+    assert stop_event.is_set()
+
+
+def test_receive_messages_connection_lost(monkeypatch):
+    class BrokenSocket(FakeSocket):
+        def recv(self, buffer_size):
+            raise ConnectionResetError
+
+    client_socket = BrokenSocket()
+
+    stop_event = threading.Event()
+    login_queue = Queue()
+    history_queue = Queue()
+
+    errors = []
+
+    monkeypatch.setattr(
+        client.ui,
+        "show_error",
+        lambda message: errors.append(message),
+    )
+
+    client.receive_messages(
+        client_socket,
+        stop_event,
+        login_queue,
+        history_queue,
+    )
+
+    assert errors == ["Connection lost."]
+    assert stop_event.is_set()
+
+
+# ============================================================
 # request_username
+# ============================================================
 
 def test_request_username(monkeypatch):
-    import threading
-    from queue import Queue
-
     client_socket = FakeSocket()
     login_queue = Queue()
 
     monkeypatch.setattr(
-        "builtins.input",
-        lambda _: "Alex"
+        client.ui,
+        "ask_username",
+        lambda: "Alex",
     )
 
     login_queue.put(
         (
             True,
-            ""
+            "Welcome, Alex!",
         )
     )
 
@@ -292,19 +453,16 @@ def test_request_username(monkeypatch):
     assert result is True
 
     command, payload = protocol.decode_message(
-        client_socket.sent_data.decode(
-            config.ENCODING
-        ).strip()
+        client_socket.sent_data[0]
+        .decode(config.ENCODING)
+        .strip()
     )
 
     assert command == protocol.COMMAND_SET_NAME
     assert payload == "Alex"
 
 
-def test_request_username_empty_then_valid(monkeypatch, capsys):
-    import threading
-    from queue import Queue
-
+def test_request_username_empty_then_valid(monkeypatch):
     client_socket = FakeSocket()
     login_queue = Queue()
 
@@ -314,15 +472,24 @@ def test_request_username_empty_then_valid(monkeypatch, capsys):
     ])
 
     monkeypatch.setattr(
-        "builtins.input",
-        lambda _: next(usernames)
+        client.ui,
+        "ask_username",
+        lambda: next(usernames),
     )
 
     login_queue.put(
         (
             True,
-            ""
+            "Welcome, Alex!",
         )
+    )
+
+    errors = []
+
+    monkeypatch.setattr(
+        client.ui,
+        "show_error",
+        lambda message: errors.append(message),
     )
 
     stop_event = threading.Event()
@@ -333,19 +500,22 @@ def test_request_username_empty_then_valid(monkeypatch, capsys):
         stop_event,
     )
 
-    captured = capsys.readouterr()
-
     assert result is True
-    assert "[SERVER] Username cannot be empty." in captured.out
+    assert errors == [
+        "Username cannot be empty."
+    ]
+
+    command, payload = protocol.decode_message(
+        client_socket.sent_data[0]
+        .decode(config.ENCODING)
+        .strip()
+    )
+
+    assert command == protocol.COMMAND_SET_NAME
+    assert payload == "Alex"
 
 
-def test_request_username_login_failed_then_success(
-    monkeypatch,
-    capsys,
-):
-    import threading
-    from queue import Queue
-
+def test_request_username_login_failed_then_success(monkeypatch):
     client_socket = FakeSocket()
     login_queue = Queue()
 
@@ -355,22 +525,37 @@ def test_request_username_login_failed_then_success(
     ])
 
     monkeypatch.setattr(
-        "builtins.input",
-        lambda _: next(usernames)
+        client.ui,
+        "ask_username",
+        lambda: next(usernames),
     )
 
     login_queue.put(
         (
             False,
-            "Username already in taken."
+            "Username already in taken.",
         )
     )
 
     login_queue.put(
         (
             True,
-            ""
+            "Welcome, Bob!",
         )
+    )
+
+    failed_messages = []
+
+    monkeypatch.setattr(
+        client.ui,
+        "show_login_failed",
+        lambda message: failed_messages.append(message),
+    )
+
+    monkeypatch.setattr(
+        client.ui,
+        "show_login_success",
+        lambda username: None,
     )
 
     stop_event = threading.Event()
@@ -381,16 +566,69 @@ def test_request_username_login_failed_then_success(
         stop_event,
     )
 
-    captured = capsys.readouterr()
-
     assert result is True
-    assert "Username already in taken." in captured.out
+    assert failed_messages == [
+        "Username already in taken."
+    ]
+
+    assert len(client_socket.sent_data) == 2
+
+    command, payload = protocol.decode_message(
+        client_socket.sent_data[0]
+        .decode(config.ENCODING)
+        .strip()
+    )
+
+    assert command == protocol.COMMAND_SET_NAME
+    assert payload == "Alex"
+
+    command, payload = protocol.decode_message(
+        client_socket.sent_data[1]
+        .decode(config.ENCODING)
+        .strip()
+    )
+
+    assert command == protocol.COMMAND_SET_NAME
+    assert payload == "Bob"
+
+
+def test_request_username_send_failed(monkeypatch):
+    class BrokenSocket(FakeSocket):
+        def sendall(self, data):
+            raise BrokenPipeError
+
+    client_socket = BrokenSocket()
+    login_queue = Queue()
+
+    monkeypatch.setattr(
+        client.ui,
+        "ask_username",
+        lambda: "Alex",
+    )
+
+    errors = []
+
+    monkeypatch.setattr(
+        client.ui,
+        "show_error",
+        lambda message: errors.append(message),
+    )
+
+    stop_event = threading.Event()
+
+    result = client.request_username(
+        client_socket,
+        login_queue,
+        stop_event,
+    )
+
+    assert result is False
+    assert errors == [
+        "Failed to send username."
+    ]
 
 
 def test_request_username_stop_event(monkeypatch):
-    import threading
-    from queue import Queue
-
     client_socket = FakeSocket()
     login_queue = Queue()
 
@@ -398,8 +636,9 @@ def test_request_username_stop_event(monkeypatch):
     stop_event.set()
 
     monkeypatch.setattr(
-        "builtins.input",
-        lambda _: "Alex"
+        client.ui,
+        "ask_username",
+        lambda: "Alex",
     )
 
     result = client.request_username(
@@ -409,10 +648,12 @@ def test_request_username_stop_event(monkeypatch):
     )
 
     assert result is False
-    assert client_socket.sent_data is None
+    assert client_socket.sent_data == []
 
 
+# ============================================================
 # chat_loop
+# ============================================================
 
 def test_chat_loop_send_message(monkeypatch):
     client_socket = FakeSocket()
@@ -423,11 +664,10 @@ def test_chat_loop_send_message(monkeypatch):
     ])
 
     monkeypatch.setattr(
-        "builtins.input",
-        lambda: next(messages)
+        client.ui,
+        "prompt_message",
+        lambda stop_event: next(messages),
     )
-
-    import threading
 
     stop_event = threading.Event()
 
@@ -436,12 +676,23 @@ def test_chat_loop_send_message(monkeypatch):
         stop_event,
     )
 
-    assert result is None
+    assert result is True
+
+    assert len(client_socket.sent_data) == 2
 
     command, payload = protocol.decode_message(
-        client_socket.sent_data.decode(
-            config.ENCODING
-        ).strip()
+        client_socket.sent_data[0]
+        .decode(config.ENCODING)
+        .strip()
+    )
+
+    assert command == protocol.COMMAND_CHAT
+    assert payload == "Hello"
+
+    command, payload = protocol.decode_message(
+        client_socket.sent_data[1]
+        .decode(config.ENCODING)
+        .strip()
     )
 
     assert command == protocol.COMMAND_QUIT
@@ -457,27 +708,79 @@ def test_chat_loop_online(monkeypatch):
     ])
 
     monkeypatch.setattr(
-        "builtins.input",
-        lambda: next(messages)
+        client.ui,
+        "prompt_message",
+        lambda stop_event: next(messages),
     )
-
-    import threading
 
     stop_event = threading.Event()
 
-    client.chat_loop(
+    result = client.chat_loop(
         client_socket,
         stop_event,
     )
 
+    assert result is True
+    assert len(client_socket.sent_data) == 2
+
     command, payload = protocol.decode_message(
-        client_socket.sent_data.decode(
-            config.ENCODING
-        ).strip()
+        client_socket.sent_data[0]
+        .decode(config.ENCODING)
+        .strip()
+    )
+
+    assert command == protocol.COMMAND_ONLINE
+    assert payload == ""
+
+    command, payload = protocol.decode_message(
+        client_socket.sent_data[1]
+        .decode(config.ENCODING)
+        .strip()
     )
 
     assert command == protocol.COMMAND_QUIT
     assert payload == ""
+
+
+def test_chat_loop_help(monkeypatch):
+    client_socket = FakeSocket()
+
+    messages = iter([
+        "/help",
+        "/quit",
+    ])
+
+    monkeypatch.setattr(
+        client.ui,
+        "prompt_message",
+        lambda stop_event: next(messages),
+    )
+
+    help_called = []
+
+    monkeypatch.setattr(
+        client.ui,
+        "show_help",
+        lambda: help_called.append(True),
+    )
+
+    stop_event = threading.Event()
+
+    result = client.chat_loop(
+        client_socket,
+        stop_event,
+    )
+
+    assert result is True
+    assert help_called == [True]
+
+    command, payload = protocol.decode_message(
+        client_socket.sent_data[-1]
+        .decode(config.ENCODING)
+        .strip()
+    )
+
+    assert command == protocol.COMMAND_QUIT
 
 
 def test_chat_loop_empty_message(monkeypatch):
@@ -490,56 +793,173 @@ def test_chat_loop_empty_message(monkeypatch):
     ])
 
     monkeypatch.setattr(
-        "builtins.input",
-        lambda: next(messages)
+        client.ui,
+        "prompt_message",
+        lambda stop_event: next(messages),
     )
-
-    import threading
 
     stop_event = threading.Event()
 
-    client.chat_loop(
+    result = client.chat_loop(
         client_socket,
         stop_event,
     )
 
+    assert result is True
+
+    assert len(client_socket.sent_data) == 1
+
     command, payload = protocol.decode_message(
-        client_socket.sent_data.decode(
-            config.ENCODING
-        ).strip()
+        client_socket.sent_data[0]
+        .decode(config.ENCODING)
+        .strip()
     )
 
     assert command == protocol.COMMAND_QUIT
 
 
-def test_chat_loop_send_failed():
+def test_chat_loop_prompt_returns_none(monkeypatch):
+    client_socket = FakeSocket()
+
+    monkeypatch.setattr(
+        client.ui,
+        "prompt_message",
+        lambda stop_event: None,
+    )
+
+    stop_event = threading.Event()
+
+    result = client.chat_loop(
+        client_socket,
+        stop_event,
+    )
+
+    assert result is True
+    assert stop_event.is_set()
+    assert client_socket.sent_data == []
+
+
+def test_chat_loop_send_failed(monkeypatch):
     class BrokenSocket(FakeSocket):
         def sendall(self, data):
             raise BrokenPipeError
 
     client_socket = BrokenSocket()
 
-    import threading
+    monkeypatch.setattr(
+        client.ui,
+        "prompt_message",
+        lambda stop_event: "Hello",
+    )
+
+    errors = []
+
+    monkeypatch.setattr(
+        client.ui,
+        "show_error",
+        lambda message: errors.append(message),
+    )
 
     stop_event = threading.Event()
 
-    inputs = iter([
-        "Hello"
-    ])
+    result = client.chat_loop(
+        client_socket,
+        stop_event,
+    )
 
-    import builtins
-
-    original_input = builtins.input
-
-    try:
-        builtins.input = lambda: next(inputs)
-
-        result = client.chat_loop(
-            client_socket,
-            stop_event,
-        )
-    finally:
-        builtins.input = original_input
-
-    assert result is None
+    assert result is False
     assert stop_event.is_set()
+    assert errors == [
+        "Failed to send message."
+    ]
+
+
+def test_chat_loop_online_send_failed(monkeypatch):
+    class BrokenSocket(FakeSocket):
+        def sendall(self, data):
+            raise BrokenPipeError
+
+    client_socket = BrokenSocket()
+
+    monkeypatch.setattr(
+        client.ui,
+        "prompt_message",
+        lambda stop_event: "/online",
+    )
+
+    errors = []
+
+    monkeypatch.setattr(
+        client.ui,
+        "show_error",
+        lambda message: errors.append(message),
+    )
+
+    stop_event = threading.Event()
+
+    result = client.chat_loop(
+        client_socket,
+        stop_event,
+    )
+
+    assert result is False
+    assert stop_event.is_set()
+    assert errors == [
+        "Failed to request online users."
+    ]
+
+
+def test_chat_loop_quit_send_failed(monkeypatch):
+    class BrokenSocket(FakeSocket):
+        def sendall(self, data):
+            raise BrokenPipeError
+
+    client_socket = BrokenSocket()
+
+    monkeypatch.setattr(
+        client.ui,
+        "prompt_message",
+        lambda stop_event: "/quit",
+    )
+
+    stop_event = threading.Event()
+
+    result = client.chat_loop(
+        client_socket,
+        stop_event,
+    )
+
+    assert result is False
+    assert stop_event.is_set()
+
+
+def test_chat_loop_keyboard_interrupt(monkeypatch):
+    client_socket = FakeSocket()
+
+    def raise_keyboard_interrupt(stop_event):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(
+        client.ui,
+        "prompt_message",
+        raise_keyboard_interrupt,
+    )
+
+    stop_event = threading.Event()
+
+    result = client.chat_loop(
+        client_socket,
+        stop_event,
+    )
+
+    assert result is True
+    assert stop_event.is_set()
+
+    command, payload = protocol.decode_message(
+        client_socket.sent_data[0]
+        .decode(config.ENCODING)
+        .strip()
+    )
+
+    assert command == protocol.COMMAND_QUIT
+    assert payload == ""

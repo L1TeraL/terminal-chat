@@ -178,7 +178,7 @@ def chat_loop(
             if message is None:
                 break
 
-            if not message:
+            if not message.strip():
                 continue
 
             command = message.lower()
