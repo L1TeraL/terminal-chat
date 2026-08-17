@@ -93,7 +93,7 @@ def test_two_clients_login(running_server):
     # Alex login
     packet = protocol.encode_message(
         protocol.COMMAND_SET_NAME,
-        "Alex"
+        "Alex",
     )
 
     client_1.sendall(
@@ -107,13 +107,23 @@ def test_two_clients_login(running_server):
 
     command, payload = reader_1.recv_message()
 
+    assert command == protocol.COMMAND_CHAT_HISTORY
+    assert isinstance(payload, list)
+
+    command, payload = reader_1.recv_message()
+
     assert command == protocol.COMMAND_USER_LIST
     assert payload == ["Alex"]
+
+    command, payload = reader_2.recv_message()
+
+    assert command == protocol.COMMAND_INFO
+    assert payload == "Alex joined the chat."
 
     # Bob login
     packet = protocol.encode_message(
         protocol.COMMAND_SET_NAME,
-        "Bob"
+        "Bob",
     )
 
     client_2.sendall(
@@ -127,14 +137,27 @@ def test_two_clients_login(running_server):
 
     command, payload = reader_2.recv_message()
 
+    assert command == protocol.COMMAND_CHAT_HISTORY
+    assert isinstance(payload, list)
+
+    command, payload = reader_2.recv_message()
+
     assert command == protocol.COMMAND_USER_LIST
     assert payload == ["Alex", "Bob"]
 
-    # Alex receives information about Bob
-    command, payload = reader_1.recv_message()
+    packet = protocol.encode_message(
+        protocol.COMMAND_QUIT,
+        "",
+    )
+
+    client_1.sendall(
+        packet.encode(config.ENCODING)
+    )
+
+    command, payload = reader_2.recv_message()
 
     assert command == protocol.COMMAND_INFO
-    assert payload == "Bob joined the chat."
+    assert payload == "Alex left the chat."
 
     client_1.close()
     client_2.close()
